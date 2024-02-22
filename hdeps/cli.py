@@ -20,6 +20,8 @@ from .resolution import Walker
 from .session import get_cached_retry_session, get_retry_session
 from .types import CanonicalName
 
+LOG = logging.getLogger(__name__)
+
 
 def _stats_thread() -> None:
     prev_ts = None
@@ -96,6 +98,7 @@ def _stats_thread() -> None:
     default=None,
     help="Default is to guess from NO_COLOR or FORCE_COLOR env vars being non-empty",
 )
+@click.option("--suggest", is_flag=True)
 @click.option("--have", help="pkg==ver to assume already installed", multiple=True)
 @click.option("-r", "--requirements-file", multiple=True)
 @click.argument(
@@ -118,6 +121,7 @@ def main(
     no_cache: bool,
     print_legend: bool,
     color: Optional[bool],
+    suggest: bool,
 ) -> None:
     if trace:
         ctx.with_resource(keke.TraceOutput(trace))
@@ -172,12 +176,40 @@ def main(
         color=ctx.color,
     )
 
-    for dep in deps:
-        walker.feed(Requirement(dep))
-    for req in requirements_file:
-        walker.feed_file(Path(req))
+    def run():
+        for dep in deps:
+            walker.feed(Requirement(dep))
+        for req in requirements_file:
+            walker.feed_file(Path(req))
 
-    walker.drain()
+        walker.drain()
+
+    if not suggest:
+        run()
+    else:
+        run()
+        helpful: List[str] = []
+        for project, versions in walker.known_conflicts.items():
+            for v in versions:
+                k = Requirement(f"{project}=={v}")
+                LOG.warning("Try de-conflicting %s", k)
+                walker.clear_root()
+                walker.feed(k)
+                run()
+                if project not in walker.known_conflicts:
+                    LOG.warning("Helpful!")
+                    helpful.append(k)
+                    break
+            else:
+                LOG.warning("None of those helped")
+
+        if helpful:
+            LOG.warning("Final attempt %s", helpful)
+            walker.clear_root()
+            for k in helpful:
+                walker.feed(k)
+            run()
+
     if install_order:
         walker.print_flat()
     else:

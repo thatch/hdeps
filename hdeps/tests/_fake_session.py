@@ -46,6 +46,7 @@ class FakeSession:
         resp.url = url
         resp.status_code = 200
 
+        headers = headers or {}
         if range := headers.get("Range"):
             assert not text
             resp.status_code = 206

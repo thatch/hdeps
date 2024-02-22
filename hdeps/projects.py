@@ -16,7 +16,7 @@ from zipfile import ZipFile
 import metadata_please
 from indexurl import get_index_url
 
-from keke import kev
+from keke import kev, ktrace
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
@@ -98,6 +98,7 @@ class ProjectVersion:
     def has_wheel(self) -> bool:
         return any(dp.package_type == "wheel" for dp in self.packages)
 
+    @ktrace()
     def get_deps(
         self, ps: PyPISimple, session: Session, extracted_metadata_cache: SimpleCache
     ) -> BasicMetadata:
@@ -135,64 +136,67 @@ class ProjectVersion:
         md: str
         # Ensure we don't accidentally use this later on; this was the source of a pesky cache bug
         del pkg
-        if best_pkg.has_metadata:
-            if md_bytes := extracted_metadata_cache.get(best_pkg.url):
-                md = md_bytes.decode("utf-8")
-            else:
-                with kev("pypi_simple.get_package_metadata"):
-                    # pypi-simple does the decode for you today; this wastes a
-                    # ton of time trying to guess charset, until
-                    # https://github.com/jwodder/pypi-simple/pull/22 is merged.
-                    md = ps.get_package_metadata(best_pkg)
-                    extracted_metadata_cache.set(best_pkg.url, md.encode("utf-8"))
-        elif best_pkg.package_type == "wheel":
-            # Wheels can be loaded incrementally, but also provide richer, more
-            # reliable metadata.
-            if md_bytes := extracted_metadata_cache.get(best_pkg.url):
-                md = md_bytes.decode("utf-8")
-            else:
-                with kev("extract metadata remote", url=best_pkg.url):
-                    f = SeekableHttpFile(
-                        best_pkg.url,
-                        get_range=partial(get_range_requests, session=session),
-                        check_etag=False,
-                    )
-                    zf = ZipFile(f)  # type: ignore[arg-type,call-overload,unused-ignore]
-
-                    # These two lines come from warehouse itself
-                    name, version, _ = best_pkg.filename.split("-", 2)
-                    md_bytes = metadata_please.from_wheel(zf, name)
-                    extracted_metadata_cache.set(best_pkg.url, md_bytes)
-                md = md_bytes.decode("utf-8")
-        elif best_pkg.package_type == "sdist":
-            key = best_pkg.url + "#requires.txt"
-            if (md_bytes := extracted_metadata_cache.get(key)) is not None:
-                md = md_bytes.decode("utf-8")
-            else:
-                if best_pkg.filename.endswith(".zip"):
-                    with kev("extract sdist metadata remote", url=best_pkg.url):
+        with kev("get", best=str(best_pkg)):
+            if best_pkg.has_metadata:
+                if md_bytes := extracted_metadata_cache.get(best_pkg.url):
+                    md = md_bytes.decode("utf-8")
+                else:
+                    with kev("pypi_simple.get_package_metadata"):
+                        # pypi-simple does the decode for you today; this wastes a
+                        # ton of time trying to guess charset, until
+                        # https://github.com/jwodder/pypi-simple/pull/22 is merged.
+                        md = ps.get_package_metadata(best_pkg)
+                        extracted_metadata_cache.set(best_pkg.url, md.encode("utf-8"))
+            elif best_pkg.package_type == "wheel":
+                # Wheels can be loaded incrementally, but also provide richer, more
+                # reliable metadata.
+                if md_bytes := extracted_metadata_cache.get(best_pkg.url):
+                    md = md_bytes.decode("utf-8")
+                else:
+                    with kev("extract metadata remote", url=best_pkg.url):
                         f = SeekableHttpFile(
                             best_pkg.url,
                             get_range=partial(get_range_requests, session=session),
                             check_etag=False,
                         )
                         zf = ZipFile(f)  # type: ignore[arg-type,call-overload,unused-ignore]
-                        md_bytes = metadata_please.from_zip_sdist(zf)
+
+                        # These two lines come from warehouse itself
+                        name, version, _ = best_pkg.filename.split("-", 2)
+                        md_bytes = metadata_please.from_wheel(zf, name)
+                        extracted_metadata_cache.set(best_pkg.url, md_bytes)
+                    md = md_bytes.decode("utf-8")
+            elif best_pkg.package_type == "sdist":
+                key = best_pkg.url + "#requires.txt"
+                if (md_bytes := extracted_metadata_cache.get(key)) is not None:
+                    md = md_bytes.decode("utf-8")
                 else:
-                    with kev("extract tar metadata", url=best_pkg.url):
-                        with tempfile.TemporaryDirectory() as d:
-                            local_path = Path(d, best_pkg.filename)
-                            ps.download_package(
-                                best_pkg, path=local_path, verify=bool(best_pkg.digests)
+                    if best_pkg.filename.endswith(".zip"):
+                        with kev("extract sdist metadata remote", url=best_pkg.url):
+                            f = SeekableHttpFile(
+                                best_pkg.url,
+                                get_range=partial(get_range_requests, session=session),
+                                check_etag=False,
                             )
-                            with TarFile.open(local_path) as tf:
-                                md_bytes = metadata_please.from_tar_sdist(tf)
+                            zf = ZipFile(f)  # type: ignore[arg-type,call-overload,unused-ignore]
+                            md_bytes = metadata_please.from_zip_sdist(zf)
+                    else:
+                        with kev("extract tar metadata", url=best_pkg.url):
+                            with tempfile.TemporaryDirectory() as d:
+                                local_path = Path(d, best_pkg.filename)
+                                ps.download_package(
+                                    best_pkg,
+                                    path=local_path,
+                                    verify=bool(best_pkg.digests),
+                                )
+                                with TarFile.open(local_path) as tf:
+                                    md_bytes = metadata_please.from_tar_sdist(tf)
 
-                extracted_metadata_cache.set(key, md_bytes)
-                md = md_bytes.decode("utf-8")
+                    extracted_metadata_cache.set(key, md_bytes)
+                    md = md_bytes.decode("utf-8")
 
-        else:
-            raise NotImplementedError(best_pkg)
+            else:
+                raise NotImplementedError(best_pkg)
 
         reqs: List[Requirement] = []
         extras: List[str] = []
