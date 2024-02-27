@@ -1,0 +1,18 @@
+$ hdeps --suggest batman batman==1
+WARNING  hdeps.resolution:<n> Multiple versions for batman: 2.0 and 1.0
+WARNING  hdeps.resolution:<n> Multiple versions for robin: 2.0 and 1.0
+WARNING  hdeps.cli:<n> Try de-conflicting batman==1.0
+WARNING  hdeps.cli:<n> Helpful!
+WARNING  hdeps.cli:<n> Try de-conflicting robin==1.0
+WARNING  hdeps.resolution:<n> Multiple versions for batman: 2.0 and 1.0
+WARNING  hdeps.resolution:<n> Multiple versions for robin: 1.0 and 2.0
+WARNING  hdeps.resolution:<n> Multiple versions for robin: 2.0 and 1.0
+WARNING  hdeps.cli:<n> Try de-conflicting robin==2.0
+WARNING  hdeps.resolution:<n> Multiple versions for batman: 2.0 and 1.0
+WARNING  hdeps.resolution:<n> Multiple versions for robin: 2.0 and 1.0
+WARNING  hdeps.cli:<n> None of those helped
+WARNING  hdeps.cli:<n> Final attempt [<Requirement('batman==1.0')>]
+batman (==1.0) via ==1.0
+. robin (==1.0) via ==1.0
+batman (==1.0) (already listed) via *
+batman (==1.0) (already listed) via ==1
